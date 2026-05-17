@@ -1,56 +1,37 @@
-name: Build Photoshop AVIF Plugin
-
-on:
-  push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
-  workflow_dispatch:
-
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
-jobs:
-  build:
-    runs-on: windows-2022
-
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        submodules: recursive
-        fetch-depth: 0
-
-    # 1. 运行 vcpkg 清单模式恢复依赖（在云端虚拟机中编译出真正的 heif 和 lcms2 静态库及头文件）
-    - name: Run vcpkg to restore dependencies
-      uses: lukka/run-vcpkg@v11
-      with:
-        vcpkgJsonGlob: './vcpkg.json'
-
-    # 2. 物理伪装硬编码的 3rd-party 相对目录，将 vcpkg 恢复出来的头文件精准拦截并重定向
+# 2. 物理重构 3rd-party 目录，完美对齐 #include "libheif/heif.h" 和 #include "lcms2.h"
     - name: Fix Hardcoded Third-Party Directories
       shell: powershell
       run: |
-        # 创建项目工程硬编码寻找的相对路径
-        New-Item -ItemType Directory -Force -Path "3rd-party/libheif/libheif"
-        New-Item -ItemType Directory -Force -Path "3rd-party/libheif/build-x64"
-        New-Item -ItemType Directory -Force -Path "3rd-party/aom"
+        # 创建标准的 3rd-party 根结构
+        New-Item -ItemType Directory -Force -Path "3rd-party"
 
-        # 从 vcpkg 的安装副本中把 heif 核心头文件拷贝过来
-        $vcpkgInstalledPath = "$env:VCPKG_ROOT\installed\x64-windows\include"
-        if (Test-Path "$vcpkgInstalledPath\libheif") {
-            Copy-Item -Path "$vcpkgInstalledPath\libheif\*" -Destination "3rd-party/libheif/libheif" -Recurse -Force
-            Copy-Item -Path "$vcpkgInstalledPath\libheif\*" -Destination "3rd-party/libheif" -Recurse -Force
-            echo "Successfully mapped libheif headers from vcpkg."
+        # 锁定 vcpkg 实际下载解压的系统头文件根目录
+        $vcpkgIncludePath = "$env:VCPKG_ROOT\installed\x64-windows\include"
+        echo "Vcpkg Include Path is: $vcpkgIncludePath"
+
+        if (Test-Path $vcpkgIncludePath) {
+            # 绝杀核心一：直接把整个 vcpkg 的 include 树复制进项目的 3rd-party 
+            # 这样 3rd-party/libheif/heif.h 就会变成物理事实，完美对齐 #include "libheif/heif.h"
+            Copy-Item -Path "$vcpkgIncludePath\*" -Destination "3rd-party\" -Recurse -Force
+            
+            # 绝杀核心二：为了兼容部分源码直接无前缀 #include "heif.h" 或寻找旧版物理夹
+            # 我们在 3rd-party 下再冗余复制一份 libheif 内部文件
+            if (Test-Path "$vcpkgIncludePath\libheif") {
+                New-Item -ItemType Directory -Force -Path "3rd-party/libheif"
+                Copy-Item -Path "$vcpkgIncludePath\libheif\*" -Destination "3rd-party/libheif\" -Recurse -Force
+            }
+            
+            # 绝杀核心三：解决 #include "lcms2.h"，直接把它丢到 3rd-party 根目录下及各个子目录下，多点狙击
+            if (Test-Path "$vcpkgIncludePath\lcms2.h") {
+                Copy-Item -Path "$vcpkgIncludePath\lcms2.h" -Destination "3rd-party\" -Force
+                Copy-Item -Path "$vcpkgIncludePath\lcms2.h" -Destination "3rd-party/libheif\" -Force
+            }
+            echo "Successfully mirrored full vcpkg structure to 3rd-party."
+        } else {
+            Write-Error "Vcpkg include path not found! Check vcpkg restore step."
         }
 
-        # 顺便把色彩管理 lcms2.h 塞进硬编码包含路径中
-        if (Test-Path "$vcpkgInstalledPath\lcms2.h") {
-            Copy-Item -Path "$vcpkgInstalledPath\lcms2.h" -Destination "3rd-party/libheif/" -Force
-            echo "Successfully mapped lcms2 headers."
-        }
-
-    # 3. 动态生成功能完备的本地 Photoshop SDK 替代存根（含 PIFormat.h 和 PIAbout.h 核心数据结构）
+    # 3. 动态生成功能完备的本地 Photoshop SDK 替代存根并强制覆盖硬编码路径
     - name: Generate Local Photoshop Stub Headers
       shell: powershell
       run: |
@@ -136,10 +117,16 @@ jobs:
         # 1) 分发到 C++ 源码公共目录
         Copy-Item -Path "$sdkPath\*" -Destination "src\common\" -Force
         
-        # 2) 分发到工程里硬编码寻找的宿主 SDK 相对目录，双层拦截
-        $hardcodedPsDir = "3rd-party/adobe_photoshop_sdk/pluginsdk/photoshopapi/photoshop"
-        New-Item -ItemType Directory -Force -Path $hardcodedPsDir
-        Copy-Item -Path "$sdkPath\*" -Destination $hardcodedPsDir -Force
+        # 2) 暴力注入到项目硬编码寻找的宿主 SDK 相对目录，彻底解决所有包含了该 SDK 的绝对文件
+        $hardcodedPsDirs = @(
+            "3rd-party/adobe_photoshop_sdk/pluginsdk/photoshopapi/photoshop",
+            "3rd-party/adobe_photoshop_sdk/pluginsdk/photoshopapi/pica_sp",
+            "3rd-party/adobe_photoshop_sdk/pluginsdk/samplecode/common/includes"
+        )
+        foreach ($dir in $hardcodedPsDirs) {
+            New-Item -ItemType Directory -Force -Path $dir
+            Copy-Item -Path "$sdkPath\*" -Destination $dir -Force
+        }
         
         echo "Photoshop Stub headers perfectly dispatched."
 
@@ -149,25 +136,9 @@ jobs:
     - name: Restore NuGet Packages
       run: nuget restore vs/AvifFormat.sln
 
-    # 4. 执行最终构建：利用 INCLUDE 环境变量无损注入附加路径，规避 MSBuild 命令行转义死锁
+    # 4. 执行纯净构建：此时 3rd-party 文件夹下已经是完全准备就绪的物理依赖，不依赖任何外界变量
     - name: Build Solution
-      shell: powershell
       run: |
-        # 隐式挂载包含路径，让所有 CL.exe 编译器原生可见
-        $env:INCLUDE = "${{ github.workspace }}\local-ps-sdk;${{ github.workspace }}\3rd-party\libheif;$env:INCLUDE"
-        
-        # 启动 MSBuild 干净编译
         msbuild vs/AvifFormat.sln /p:Configuration=Release /p:Platform=x64 /t:Build /p:BuildInParallel=true /v:n
       env:
         PhotoshopSDKDir: ${{ github.workspace }}\local-ps-sdk\
-
-    # 5. 自动收集编译出的正式 Photoshop 插件文件（.8bi）
-    - name: Upload Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: AvifFormat_x64_Compiled
-        path: |
-          vs/x64/Release/AvifFormat.8bi
-          vs/Release/AvifFormat.8bi
-          vs/x64/Release/Av1Image.8bi
-          vs/Release/Av1Image.8bi
