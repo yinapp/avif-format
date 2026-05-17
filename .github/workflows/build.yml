@@ -34,9 +34,15 @@ jobs:
         # 创建标准的 3rd-party 根结构
         New-Item -ItemType Directory -Force -Path "3rd-party"
 
-        # 锁定 vcpkg 实际下载解压的系统头文件根目录
-        $vcpkgIncludePath = "$env:VCPKG_ROOT\installed\x64-windows\include"
-        echo "Vcpkg Include Path is: $vcpkgIncludePath"
+        # 核心修正：直接指向日志中显现的本地工作区安装路径，不再依赖系统级的 VCPKG_ROOT 变量
+        $vcpkgIncludePath = "${{ github.workspace }}\vcpkg\installed\x64-windows\include"
+        echo "Primary Target Vcpkg Include Path is: $vcpkgIncludePath"
+
+        # 如果清单模式跑完还没生成，尝试捕获另一个常见的本地路径（部分版本 run-vcpkg 会带有下划线）
+        if (-not (Test-Path $vcpkgIncludePath)) {
+            $vcpkgIncludePath = "${{ github.workspace }}\vcpkg_installed\x64-windows\include"
+            echo "Fallback check to vcpkg_installed: $vcpkgIncludePath"
+        }
 
         if (Test-Path $vcpkgIncludePath) {
             # 绝杀核心一：直接把整个 vcpkg 的 include 树复制进项目的 3rd-party
@@ -57,7 +63,9 @@ jobs:
             }
             echo "Successfully mirrored full vcpkg structure to 3rd-party."
         } else {
-            Write-Error "Vcpkg include path not found! Check vcpkg restore step."
+            # 兜底友好提示，若依然失败则打印当前工作区的所有物理目录结构帮助精准定位
+            Get-ChildItem -Path "${{ github.workspace }}" -Recurse -Depth 2 | Select-Object FullName
+            Write-Error "Vcpkg include path still not found! Check directory list above."
         }
 
     # 3. 动态生成功能完备的本地 Photoshop SDK 替代存根并强制覆盖硬编码路径
