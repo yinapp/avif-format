@@ -21,13 +21,13 @@ jobs:
         submodules: recursive
         fetch-depth: 0
 
-    # 1. 直接拉取第三方维护的、干净完整的 Photoshop SDK 头文件镜像（不再依赖 Adobe 官网链接）
-    - name: Clone Photoshop SDK Headers
+    # 1. 切换为 Adobe 官方在 GitHub 上的开源 SDK 仓
+    - name: Clone Official Adobe Photoshop SDK
       uses: actions/checkout@v4
       with:
-        repository: textmeshpro/photoshop-pluginsdk
+        repository: adobe-photoshop/spaces-adapter
         path: photoshop-sdk-dir
-        ref: master
+        ref: main
 
     - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v2
@@ -35,12 +35,13 @@ jobs:
     - name: Restore NuGet Packages
       run: nuget restore vs/AvifFormat.sln
 
-    # 2. 正统解法：通过向环境变量注入 PhotoshopSDKDir，让作者的项目文件自动识别 SDK 路径
+    # 2. 双保险注入：通过 env 变量 + MSBuild 路径参数强制打通 PIDefines.h
+    # 官方仓的头文件在 spaces-adapter/pluginsdk/samplecode/common/includes 目录下
     - name: Build Solution
       run: |
-        msbuild vs/AvifFormat.sln /p:Configuration=Release /p:Platform=x64 /t:Build /p:BuildInParallel=true /v:n
+        msbuild vs/AvifFormat.sln /p:Configuration=Release /p:Platform=x64 /t:Build /p:BuildInParallel=true /v:n /p:AdditionalIncludeDirectories="${{ github.workspace }}\photoshop-sdk-dir\pluginsdk\samplecode\common\includes"
       env:
-        PhotoshopSDKDir: ${{ github.workspace }}\photoshop-sdk-dir\
+        PhotoshopSDKDir: ${{ github.workspace }}\photoshop-sdk-dir\pluginsdk\
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
