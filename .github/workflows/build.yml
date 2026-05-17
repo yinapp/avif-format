@@ -18,31 +18,38 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 1. 真正激活并缓存 vcpkg 依赖
       - name: Restore vcpkg artifacts locally
+        shell: pwsh
         run: |
-          echo "Restoring vcpkg..."
+          Write-Output "Integrating vcpkg with MSBuild..."
+          # 显式激活 vcpkg 的全局集成，让 MSBuild 能够自动识别 vcpkg.json
+          vcpkg integrate install
+          
+          Write-Output "Triggering vcpkg manifest install..."
+          # 强行触发一次清单模式安装，确保 vcpkg_installed 目录在编译前生成
+          vcpkg install --triplet=x64-windows
 
       - name: Fix Hardcoded Third-Party Directories
         shell: pwsh
         run: |
-          # 1. 定义清晰的绝对路径，防止路径歧义
+          # 定义清晰的绝对路径
           $workspace = "${{ github.workspace }}"
           $vcpkgInclude = Join-Path $workspace "vcpkg_installed\x64-windows\include"
           $targetDir = Join-Path $workspace "3rd-party\libheif"
           
-          # 2. 如果 vcpkg 目录不存在，创建空目录以防报错
+          # 如果 vcpkg 目录不存在，创建空目录以防报错
           if (!(Test-Path $vcpkgInclude)) {
               Write-Warning "Vcpkg include directory not found. Creating empty path."
               New-Item -ItemType Directory -Force -Path $vcpkgInclude | Out-Null
           }
           
-          # 3. 确保目标目录存在
+          # 确保目标目录存在
           if (!(Test-Path $targetDir)) {
               New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
           }
           
-          # 4. 彻底抛弃 Robocopy /MIR，改用绝对安全的 Copy-Item
-          # 仅复制内容，绝不执行删除或镜像遮蔽
+          # 安全增量复制头文件，绝不执行删除
           Write-Output "Copying headers from $vcpkgInclude to $targetDir ..."
           Copy-Item -Path "$vcpkgInclude\*" -Destination $targetDir -Recurse -Force -ErrorAction SilentlyContinue
           
@@ -56,7 +63,6 @@ jobs:
         uses: microsoft/setup-msbuild@v2
 
       - name: Restore NuGet Packages
-        # 此时源码被安全保留，标准的 msbuild 命令将恢复正常
         run: msbuild AvifFormat.sln /t:Restore /p:VcpkgEnableManifest=true
 
       - name: Build Solution
