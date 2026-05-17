@@ -19,7 +19,6 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Restore vcpkg artifacts locally
-        # 保持你原本的 vcpkg 恢复逻辑不变
         run: |
           echo "Restoring vcpkg..."
 
@@ -32,7 +31,7 @@ jobs:
               New-Item -ItemType Directory -Force -Path $targetDir
           }
           
-          # 2. 定位 Vcpkg 路径（增强健壮性：如果不存在则自动创建，防止脚本崩溃）
+          # 2. 定位 Vcpkg 路径（如果不存在则自动创建，防止脚本崩溃）
           $vcpkgInclude = "vcpkg_installed\x64-windows\include"
           if (!(Test-Path $vcpkgInclude)) {
               Write-Warning "Vcpkg include directory not found at $vcpkgInclude. Creating an empty one to prevent crash."
@@ -44,7 +43,6 @@ jobs:
           Write-Output "Target Vcpkg Include Path is: $fullPath"
           
           # 3. 使用 Robocopy 安全镜像目录结构
-          # 即使源目录为空，Robocopy 配合 /E /MIR 也会正常执行，退出码为 0 或 1
           robocopy ".\$vcpkgInclude" ".\$targetDir" /E /MIR
           
           # 4. 显式判断 Robocopy 的全局退出码（小于 8 均算成功）
@@ -64,10 +62,12 @@ jobs:
         uses: microsoft/setup-msbuild@v2
 
       - name: Restore NuGet Packages
-        run: msbuild /t:Restore
+        # ⚠️ 请将 YourSolution.sln 替换为你项目实际的 sln 文件路径
+        run: msbuild YourSolution.sln /t:Restore
 
       - name: Build Solution
-        run: msbuild /p:Configuration=Release /p:Platform=x64
+        # ⚠️ 请将 YourSolution.sln 替换为你项目实际的 sln 文件路径
+        run: msbuild YourSolution.sln /p:Configuration=Release /p:Platform=x64
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
