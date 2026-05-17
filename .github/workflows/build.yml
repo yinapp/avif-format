@@ -21,57 +21,56 @@ jobs:
         submodules: recursive
         fetch-depth: 0
 
-    # 核心破局点：不再拉取任何外部仓，本地一条龙生成所有全套组件，彻底解决打地鼠问题
-    # 包含了资源编译器所需要的全部基础平台宏、以及资源类型的入口声明
-    name: Generate Local Photoshop Stub Headers
-    shell: powershell
-    run: |
-      # 创建临时的全局包含目录
-      $sdkPath = "${{ github.workspace }}\local-ps-sdk"
-      New-Item -ItemType Directory -Force -Path $sdkPath
+    # 核心破局点：前方加上了正确的连字符 - 确保 YAML 语法 100% 正确
+    - name: Generate Local Photoshop Stub Headers
+      shell: powershell
+      run: |
+        # 创建临时的全局包含目录
+        $sdkPath = "${{ github.workspace }}\local-ps-sdk"
+        New-Item -ItemType Directory -Force -Path $sdkPath
 
-      # 1. 动态生成 PIDefines.h
-      $pidDef = @"
-      #ifndef __PIDEFINES_H__
-      #define __PIDEFINES_H__
-      #ifndef MSWindows
-      #define MSWindows 1
-      #endif
-      #ifndef Windows
-      #define Windows 1
-      #endif
-      #define SystemProcessor 2
-      #endif
-      "@
-      Set-Content -Path "$sdkPath\PIDefines.h" -Value $pidDef
+        # 1. 动态生成 PIDefines.h
+        $pidDef = @"
+        #ifndef __PIDEFINES_H__
+        #define __PIDEFINES_H__
+        #ifndef MSWindows
+        #define MSWindows 1
+        #endif
+        #ifndef Windows
+        #define Windows 1
+        #endif
+        #define SystemProcessor 2
+        #endif
+        "@
+        Set-Content -Path "$sdkPath\PIDefines.h" -Value $pidDef
 
-      # 2. 动态生成 PITerminology.h
-      $piTerm = @"
-      #ifndef __PITERMINOLOGY_H__
-      #define __PITERMINOLOGY_H__
-      #endif
-      "@
-      Set-Content -Path "$sdkPath\PITerminology.h" -Value $piTerm
+        # 2. 动态生成 PITerminology.h
+        $piTerm = @"
+        #ifndef __PITERMINOLOGY_H__
+        #define __PITERMINOLOGY_H__
+        #endif
+        "@
+        Set-Content -Path "$sdkPath\PITerminology.h" -Value $piTerm
 
-      # 3. 动态生成 PIActions.h
-      $piAct = @"
-      #ifndef __PIACTIONS_H__
-      #define __PIACTIONS_H__
-      #endif
-      "@
-      Set-Content -Path "$sdkPath\PIActions.h" -Value $piAct
+        # 3. 动态生成 PIActions.h
+        $piAct = @"
+        #ifndef __PIACTIONS_H__
+        #define __PIACTIONS_H__
+        #endif
+        "@
+        Set-Content -Path "$sdkPath\PIActions.h" -Value $piAct
 
-      # 4. 动态生成 PIGeneral.h (预防下一轮报错)
-      $piGen = @"
-      #ifndef __PIGENERAL_H__
-      #define __PIGENERAL_H__
-      #endif
-      "@
-      Set-Content -Path "$sdkPath\PIGeneral.h" -Value $piGen
+        # 4. 动态生成 PIGeneral.h
+        $piGen = @"
+        #ifndef __PIGENERAL_H__
+        #define __PIGENERAL_H__
+        #endif
+        "@
+        Set-Content -Path "$sdkPath\PIGeneral.h" -Value $piGen
 
-      # 5. 暴力覆盖到源码目录以防万一
-      Copy-Item -Path "$sdkPath\*" -Destination "src\common\" -Force
-      echo "All Photoshop Stub SDK headers deployed locally."
+        # 5. 复制到源码目录实施本地覆盖
+        Copy-Item -Path "$sdkPath\*" -Destination "src\common\" -Force
+        echo "All Photoshop Stub SDK headers deployed locally."
 
     - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v2
@@ -79,7 +78,6 @@ jobs:
     - name: Restore NuGet Packages
       run: nuget restore vs/AvifFormat.sln
 
-    # 精准编译，通过全局变量和本地包含参数双向堵死缺失错误
     - name: Build Solution
       run: |
         msbuild vs/AvifFormat.sln /p:Configuration=Release /p:Platform=x64 /t:Build /p:BuildInParallel=true /v:n /p:AdditionalIncludeDirectories="${{ github.workspace }}\local-ps-sdk"
