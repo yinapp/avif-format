@@ -25,25 +25,20 @@ jobs:
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
-      # 3. 核心修复：引入官方 Action 托管 vcpkg，彻底解决现场下载工具链导致的超时与死锁
-      - name: Run vcpkg to install dependencies
-        uses: lukka/run-vcpkg@v11
-        env:
-          # 强行清空可能导致老版本 vcpkg 崩溃的 GitHub 现代缓存源协议
-          VCPKG_BINARY_SOURCES: 'clear'
-        with:
-          # 在工作区内建立独立目录，绕过虚拟机的全局 C 盘权限与 Git 安全限制
-          vcpkgDirectory: '${{ github.workspace }}/vcpkg-standalone'
-          vcpkgGitCommitId: 'e3a3942a9eb0cb47c12898e5fd819f258441b6f6' # 锁定你项目期望的基准版本
-          vcpkgJsonGlob: '**/vcpkg.json'
-          runVcpkgInstall: true
+      # 3. 核心修复：直接呼叫虚拟机自带的现代版 vcpkg 执行纯正的 MSVC 编译
+      # 抛弃 lukka/run-vcpkg，利用最新版 vcpkg 内部自带的现代有效下载源
+      - name: Install Dependencies via Built-in vcpkg
+        shell: cmd
+        run: |
+          vcpkg integrate install
+          vcpkg install --triplet=x64-windows --x-install-root="%GITHUB_WORKSPACE%\vcpkg_installed"
 
       # 4. 安全地将头文件搬运到项目硬编码要求的 3rd-party 目录
       - name: Fix Hardcoded Third-Party Directories
         shell: pwsh
         run: |
           $workspace = "${{ github.workspace }}"
-          $vcpkgInclude = Join-Path $workspace "vcpkg-standalone\vcpkg_installed\x64-windows\include"
+          $vcpkgInclude = Join-Path $workspace "vcpkg_installed\x64-windows\include"
           $targetDir = Join-Path $workspace "3rd-party\libheif"
           
           if (!(Test-Path $vcpkgInclude)) {
@@ -66,13 +61,13 @@ jobs:
       - name: Restore NuGet Packages
         shell: cmd
         run: |
-          msbuild "${{ github.workspace }}\AvifFormat.sln" /t:Restore /p:VcpkgEnableManifest=true /p:VcpkgRoot="${{ github.workspace }}\vcpkg-standalone\vcpkg_installed"
+          msbuild "${{ github.workspace }}\AvifFormat.sln" /t:Restore /p:VcpkgEnableManifest=true /p:VcpkgRoot="%GITHUB_WORKSPACE%\vcpkg_installed"
 
       # 6. 执行最终编译
       - name: Build Solution
         shell: cmd
         run: |
-          msbuild "${{ github.workspace }}\AvifFormat.sln" /p:Configuration=Release /p:Platform=x64 /p:VcpkgEnableManifest=true /p:VcpkgRoot="${{ github.workspace }}\vcpkg-standalone\vcpkg_installed"
+          msbuild "${{ github.workspace }}\AvifFormat.sln" /p:Configuration=Release /p:Platform=x64 /p:VcpkgEnableManifest=true /p:VcpkgRoot="%GITHUB_WORKSPACE%\vcpkg_installed"
 
       # 7. 收集编译产物
       - name: Upload Artifact
