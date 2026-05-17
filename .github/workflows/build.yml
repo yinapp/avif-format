@@ -21,13 +21,11 @@ jobs:
         with:
           submodules: true
 
-      # 2. 微软官方标准：初始化并捕获 MSBuild 的绝对路径
+      # 2. 初始化 MSBuild 环境（会自动将 msbuild 自动加入系统 PATH）
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
-        id: setupmsbuild
 
-      # 3. 强制在标准的 cmd 环境下触发 vcpkg 本地 manifest 落地
-      # 显式指定 --x-install-root，确保所有头文件被逼在项目根目录的 vcpkg_installed 里生成
+      # 3. 强制在标准的 cmd 环境下触发 vcpkg 本地依赖编译
       - name: Install Dependencies via vcpkg
         shell: cmd
         run: |
@@ -57,17 +55,17 @@ jobs:
         run: |
           echo "Generating Photoshop stub headers..."
 
-      # 5. 核心修复：强制在标准的 cmd 下，使用 ${{ github.workspace }} 绝对路径呼叫 MSBuild
+      # 5. 核心修复：直接调用全局 msbuild 关键字，并配合项目的绝对路径
       - name: Restore NuGet Packages
         shell: cmd
         run: |
-          "${{ steps.setupmsbuild.outputs.msbuildpath }}" "${{ github.workspace }}\AvifFormat.sln" /t:Restore /p:VcpkgEnableManifest=true /p:VcpkgRoot="%GITHUB_WORKSPACE%\vcpkg_installed"
+          msbuild "${{ github.workspace }}\AvifFormat.sln" /t:Restore /p:VcpkgEnableManifest=true /p:VcpkgRoot="%GITHUB_WORKSPACE%\vcpkg_installed"
 
       # 6. 执行最终编译
       - name: Build Solution
         shell: cmd
         run: |
-          "${{ steps.setupmsbuild.outputs.msbuildpath }}" "${{ github.workspace }}\AvifFormat.sln" /p:Configuration=Release /p:Platform=x64 /p:VcpkgEnableManifest=true /p:VcpkgRoot="%GITHUB_WORKSPACE%\vcpkg_installed"
+          msbuild "${{ github.workspace }}\AvifFormat.sln" /p:Configuration=Release /p:Platform=x64 /p:VcpkgEnableManifest=true /p:VcpkgRoot="%GITHUB_WORKSPACE%\vcpkg_installed"
 
       # 7. 收集编译产物
       - name: Upload Artifact
