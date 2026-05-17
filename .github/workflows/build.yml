@@ -21,46 +21,40 @@ jobs:
         submodules: recursive
         fetch-depth: 0
 
-    # 在地就生成所需的全部 SDK 核心头文件定义，彻底斩断对 Adobe 外部仓的依赖
-    # 这不仅能骗过资源编译器，还能满足基本宏定义的展开
-    - name: Polyfill Missing Photoshop SDK Headers
+    # 1. 拉取目前依然公开存活的、专门用于编译 Photoshop 插件的 C++ SDK 镜像
+    - name: Clone Photoshop Plugin SDK Mirror
+      uses: actions/checkout@v4
+      with:
+        repository: kmar/Photoshop-Plugin-SDK
+        path: photoshop-pluginsdk
+        ref: master
+
+    # 2. 某些 SDK 仓的头文件可能分散在不同的子目录下，我们用 PowerShell 把它们统一提取到一个干净的目录
+    - name: Prepare SDK Include Directory
       shell: powershell
       run: |
-        # 1. 再次生成 PIDefines.h
-        $pidDef = @"
-        #ifndef __PIDEFINES_H__
-        #define __PIDEFINES_H__
-        #ifndef MSWindows
-        #define MSWindows 1
-        #endif
-        #ifndef Windows
-        #define Windows 1
-        #endif
-        #endif
-        "@
-        Set-Content -Path "src/common/PIDefines.h" -Value $pidDef
+        New-Item -ItemType Directory -Force -Path "${{ github.workspace }}\ps-sdk-include"
+        # 递归寻找所有 .h 文件并复制到统一的包含路径中，防止路径对不上
+        Get-ChildItem -Path "${{ github.workspace }}\photoshop-pluginsdk" -Filter *.h -Recurse | Copy-Item -Destination "${{ github.workspace }}\ps-sdk-include" -Force
+        echo "All SDK headers grouped successfully."
 
-        # 2. 伪装生成 PITerminology.h
-        $piTerm = @"
-        #ifndef __PITERMINOLOGY_H__
-        #define __PITERMINOLOGY_H__
-        // 留空或提供基本占位符，足以让资源编译器跳过 #include 检查
-        #endif
-        "@
-        Set-Content -Path "src/common/PITerminology.h" -Value $piTerm
-        
-        echo "All SDK polyfills created successfully."
+    # 3. 复制生成的头文件到当前源码目录，实施本地覆盖（双重保险，彻底解决编译器的同目录查找逻辑）
+    - name: Link Headers to Source
+      shell: powershell
+      run: |
+        Copy-Item -Path "${{ github.workspace }}\ps-sdk-include\*" -Destination "src\common\" -Force
 
+     Aurora Setup MSBuild
     - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v2
 
     - name: Restore NuGet Packages
       run: nuget restore vs/AvifFormat.sln
 
-    # 干净构建，不再附加任何飘忽不定的外部参数
+    # 4. 编译并显式通过参数指定这个全量头文件目录
     - name: Build Solution
       run: |
-        msbuild vs/AvifFormat.sln /p:Configuration=Release /p:Platform=x64 /t:Build /p:BuildInParallel=true /v:n
+        msbuild vs/AvifFormat.sln /p:Configuration=Release /p:Platform=x64 /t:Build /p:BuildInParallel=true /v:n /p:AdditionalIncludeDirectories="${{ github.workspace }}\ps-sdk-include"
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
