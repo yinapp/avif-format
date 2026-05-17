@@ -62,12 +62,10 @@ jobs:
         uses: microsoft/setup-msbuild@v2
 
       - name: Restore NuGet Packages
-        # ⚠️ 请将 YourSolution.sln 替换为你项目实际的 sln 文件路径
-        run: msbuild YourSolution.sln /t:Restore
+        run: msbuild AvifFormat.sln /t:Restore /p:VcpkgEnableManifest=true
 
       - name: Build Solution
-        # ⚠️ 请将 YourSolution.sln 替换为你项目实际的 sln 文件路径
-        run: msbuild YourSolution.sln /p:Configuration=Release /p:Platform=x64
+        run: msbuild AvifFormat.sln /p:Configuration=Release /p:Platform=x64 /p:VcpkgEnableManifest=true
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
