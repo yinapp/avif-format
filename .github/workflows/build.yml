@@ -21,25 +21,13 @@ jobs:
         submodules: recursive
         fetch-depth: 0
 
-    # 1. 补齐原作者打包的必备第三方依赖库（包含 lcms2 和 libheif/aom 源码及头文件）
-    - name: Clone Required Third-Party Dependencies
-      shell: powershell
-      run: |
-        # 创建 3rd-party 目录并拉取必需的解码依赖
-        New-Item -ItemType Directory -Force -Path "3rd-party"
-        git clone --depth=1 https://github.com/0xC0000054/libheif.git 3rd-party/libheif
-        git clone --depth=1 https://github.com/0xC0000054/aom.git 3rd-party/aom
-        # 顺便用 vcpkg 极速安装 lcms2 以提供 lcms2.h
-        vcpkg install lcms2:x64-windows
-
-    # 2. 生成能够满足 C++ 源码编译所需的 Photoshop 核心类型存根
+    # 1. 依然保留我们本地生成的 Stub 头文件，用于平替缺失的官方 SDK
     - name: Generate Local Photoshop Stub Headers
       shell: powershell
       run: |
         $sdkPath = "${{ github.workspace }}\local-ps-sdk"
         New-Item -ItemType Directory -Force -Path $sdkPath
 
-        # 基础定义
         $pidDef = @"
         #ifndef __PIDEFINES_H__
         #define __PIDEFINES_H__
@@ -54,7 +42,6 @@ jobs:
         "@
         Set-Content -Path "$sdkPath\PIDefines.h" -Value $pidDef
 
-        # C++ 源码所需的关键核心数据类型定义（补齐 PITypes.h）
         $piTypes = @"
         #ifndef __PITYPES_H__
         #define __PITYPES_H__
@@ -76,16 +63,14 @@ jobs:
         "@
         Set-Content -Path "$sdkPath\PITypes.h" -Value $piTypes
 
-        # 空占位头文件，用于阻止 #include 报错
         @("PITerminology.h", "PIActions.h", "PIGeneral.h", "PIProperties.h") | ForEach-Object {
             $name = $_
             $macro = "__" + $name.Replace(".", "_").ToUpper() + "__"
             Set-Content -Path "$sdkPath\$name" -Value "#ifndef $macro`n#define $macro`n#endif"
         }
 
-        # 暴力双向覆盖
         Copy-Item -Path "$sdkPath\*" -Destination "src\common\" -Force
-        echo "All advanced Photoshop Stub headers generated."
+        echo "Photoshop Stub headers generated."
 
     - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v2
@@ -93,12 +78,13 @@ jobs:
     - name: Restore NuGet Packages
       run: nuget restore vs/AvifFormat.sln
 
-    # 3. 编译阶段：同时引入本地 SDK 路径和 vcpkg 的头文件路径
+    # 2. 编译核心：不再手动去 pull 任何第三方依赖，通过关键参数激活微软自带的 vcpkg 集成编译链
     - name: Build Solution
       run: |
-        msbuild vs/AvifFormat.sln /p:Configuration=Release /p:Platform=x64 /t:Build /p:BuildInParallel=true /v:n /p:AdditionalIncludeDirectories="${{ github.workspace }}\local-ps-sdk;C:\vcpkg\installed\x64-windows\include"
+        msbuild vs/AvifFormat.sln /p:Configuration=Release /p:Platform=x64 /t:Build /p:BuildInParallel=true /v:n /p:AdditionalIncludeDirectories="${{ github.workspace }}\local-ps-sdk" /p:ForceVcpkgManifestEdit=true
       env:
         PhotoshopSDKDir: ${{ github.workspace }}\local-ps-sdk\
+        X_VCPKG_REGISTRIES_CACHE: ${{ github.workspace }}\.vcpkg-cache
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
@@ -107,3 +93,5 @@ jobs:
         path: |
           vs/x64/Release/AvifFormat.8bi
           vs/Release/AvifFormat.8bi
+          vs/x64/Release/Av1Image.8bi
+          vs/Release/Av1Image.8bi
