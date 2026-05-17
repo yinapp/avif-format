@@ -47,7 +47,7 @@ jobs:
           
           # 4. 显式判断 Robocopy 的全局退出码（小于 8 均算成功）
           if ($LASTEXITCODE -lt 8) {
-              Write-Output "Successfully mirrored full vcpkg structure to 3rd-party using Robocopy safely."
+              Write-Output "Successfully mirrored full vkg structure to 3rd-party using Robocopy safely."
               exit 0
           } else {
               Write-Error "Robocopy failed with critical exit code: $LASTEXITCODE"
@@ -62,12 +62,23 @@ jobs:
         uses: microsoft/setup-msbuild@v2
 
       - name: Restore NuGet Packages
-        # 使用工作区绝对路径 + 通配符，强行拉回根目录寻找 .sln
-        run: msbuild "${{ github.workspace }}\*.sln" /t:Restore /p:VcpkgEnableManifest=true
+        shell: pwsh
+        run: |
+          # 动态获取当前工作区下真实的 .sln 绝对路径
+          $slnPath = (Get-ChildItem "${{ github.workspace }}\*.sln" -File | Select-Object -First 1).FullName
+          Write-Output "Found Solution Path: $slnPath"
+          
+          # 传给 MSBuild 执行还原
+          msbuild "$slnPath" /t:Restore /p:VcpkgEnableManifest=true
 
       - name: Build Solution
-        # 同上，使用绝对路径确保 MSBuild 绝不迷路
-        run: msbuild "${{ github.workspace }}\*.sln" /p:Configuration=Release /p:Platform=x64 /p:VcpkgEnableManifest=true
+        shell: pwsh
+        run: |
+          # 动态获取当前工作区下真实的 .sln 绝对路径
+          $slnPath = (Get-ChildItem "${{ github.workspace }}\*.sln" -File | Select-Object -First 1).FullName
+          
+          # 传给 MSBuild 执行编译
+          msbuild "$slnPath" /p:Configuration=Release /p:Platform=x64 /p:VcpkgEnableManifest=true
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
