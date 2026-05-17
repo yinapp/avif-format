@@ -44,7 +44,6 @@ jobs:
       run: |
         Copy-Item -Path "${{ github.workspace }}\ps-sdk-include\*" -Destination "src\common\" -Force
 
-     Aurora Setup MSBuild
     - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v2
 
