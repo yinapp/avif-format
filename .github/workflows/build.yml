@@ -1,4 +1,33 @@
-# 2. 物理重构 3rd-party 目录，完美对齐 #include "libheif/heif.h" 和 #include "lcms2.h"
+name: Build Photoshop AVIF Plugin
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build:
+    runs-on: windows-2022
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        fetch-depth: 0
+
+    # 1. 运行 vcpkg 清单模式恢复依赖（在云端虚拟机中编译出真正的 heif 和 lcms2 静态库及头文件）
+    - name: Run vcpkg to restore dependencies
+      uses: lukka/run-vcpkg@v11
+      with:
+        vcpkgJsonGlob: './vcpkg.json'
+
+    # 2. 物理重构 3rd-party 目录，完美对齐 #include "libheif/heif.h" 和 #include "lcms2.h"
     - name: Fix Hardcoded Third-Party Directories
       shell: powershell
       run: |
@@ -10,7 +39,7 @@
         echo "Vcpkg Include Path is: $vcpkgIncludePath"
 
         if (Test-Path $vcpkgIncludePath) {
-            # 绝杀核心一：直接把整个 vcpkg 的 include 树复制进项目的 3rd-party 
+            # 绝杀核心一：直接把整个 vcpkg 的 include 树复制进项目的 3rd-party
             # 这样 3rd-party/libheif/heif.h 就会变成物理事实，完美对齐 #include "libheif/heif.h"
             Copy-Item -Path "$vcpkgIncludePath\*" -Destination "3rd-party\" -Recurse -Force
             
@@ -142,3 +171,14 @@
         msbuild vs/AvifFormat.sln /p:Configuration=Release /p:Platform=x64 /t:Build /p:BuildInParallel=true /v:n
       env:
         PhotoshopSDKDir: ${{ github.workspace }}\local-ps-sdk\
+
+    # 5. 自动收集编译出的正式 Photoshop 插件文件（.8bi）
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: AvifFormat_x64_Compiled
+        path: |
+          vs/x64/Release/AvifFormat.8bi
+          vs/Release/AvifFormat.8bi
+          vs/x64/Release/Av1Image.8bi
+          vs/Release/Av1Image.8bi
