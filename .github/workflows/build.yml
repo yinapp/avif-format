@@ -15,24 +15,19 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
-        submodules: recursive # 确保拉取了所有子模块
+        submodules: recursive # 必须递归拉取子模块
+        fetch-depth: 0        # 完整拉取历史，防止依赖部分丢失
 
     - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v2
 
-    # 第一步：必须要先编译第三方依赖库 (libheif / aom 等)
-    - name: Build Third Party Dependencies
-      run: |
-        cd 3rd-party
-        ./builddeps.cmd
-      shell: cmd
-
     - name: Restore NuGet Packages
       run: nuget restore vs/AVIFImage.sln
 
-    # 第二步：再编译主体 Photoshop 插件
-    - name: Build x64 Release
-      run: msbuild vs/AVIFImage.sln /p:Configuration=Release /p:Platform=x64
+    # 如果有预编译事件或子依赖，让 MSBuild 在编译总项目前自己分析并解决
+    - name: Build Solution with Dependencies
+      run: |
+        msbuild vs/AVIFImage.sln /p:Configuration=Release /p:Platform=x64 /t:Build /p:BuildInParallel=true
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
@@ -41,3 +36,4 @@ jobs:
         path: |
           vs/x64/Release/Av1Image.8bi
           vs/Release/Av1Image.8bi
+          bin/x64/Release/Av1Image.8bi
