@@ -21,13 +21,28 @@ jobs:
         submodules: recursive
         fetch-depth: 0
 
-    # 1. 切换为 Adobe 官方在 GitHub 上的开源 SDK 仓
-    - name: Clone Official Adobe Photoshop SDK
-      uses: actions/checkout@v4
-      with:
-        repository: adobe-photoshop/spaces-adapter
-        path: photoshop-sdk-dir
-        ref: main
+    # 1. 核心大招：在本地直接动态创建一模一样的 PIDefines.h 伪装文件
+    # 这样资源编译器就能顺利通过，不再依赖任何外部下载
+    - name: Polyfill Photoshop SDK Header
+      shell: powershell
+      run: |
+        $headerContent = @"
+        #ifndef __PIDEFINES_H__
+        #define __PIDEFINES_H__
+        
+        #ifndef MSWindows
+        #define MSWindows 1
+        #endif
+        
+        #ifndef Windows
+        #define Windows 1
+        #endif
+        
+        #endif // __PIDEFINES_H__
+        "@
+        # 写入到源码查找头文件的对应目录下
+        Set-Content -Path "src/common/PIDefines.h" -Value $headerContent
+        echo "PIDefines.h polyfill created successfully."
 
     - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v2
@@ -35,13 +50,10 @@ jobs:
     - name: Restore NuGet Packages
       run: nuget restore vs/AvifFormat.sln
 
-    # 2. 双保险注入：通过 env 变量 + MSBuild 路径参数强制打通 PIDefines.h
-    # 官方仓的头文件在 spaces-adapter/pluginsdk/samplecode/common/includes 目录下
+    # 2. 干净编译，让 MSBuild 在项目根目录下自行检索
     - name: Build Solution
       run: |
-        msbuild vs/AvifFormat.sln /p:Configuration=Release /p:Platform=x64 /t:Build /p:BuildInParallel=true /v:n /p:AdditionalIncludeDirectories="${{ github.workspace }}\photoshop-sdk-dir\pluginsdk\samplecode\common\includes"
-      env:
-        PhotoshopSDKDir: ${{ github.workspace }}\photoshop-sdk-dir\pluginsdk\
+        msbuild vs/AvifFormat.sln /p:Configuration=Release /p:Platform=x64 /t:Build /p:BuildInParallel=true /v:n
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
