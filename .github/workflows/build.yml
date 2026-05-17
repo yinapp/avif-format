@@ -62,10 +62,12 @@ jobs:
         uses: microsoft/setup-msbuild@v2
 
       - name: Restore NuGet Packages
-        run: msbuild AvifFormat.sln /t:Restore /p:VcpkgEnableManifest=true
+        # 使用工作区绝对路径 + 通配符，强行拉回根目录寻找 .sln
+        run: msbuild "${{ github.workspace }}\*.sln" /t:Restore /p:VcpkgEnableManifest=true
 
       - name: Build Solution
-        run: msbuild AvifFormat.sln /p:Configuration=Release /p:Platform=x64 /p:VcpkgEnableManifest=true
+        # 同上，使用绝对路径确保 MSBuild 绝不迷路
+        run: msbuild "${{ github.workspace }}\*.sln" /p:Configuration=Release /p:Platform=x64 /p:VcpkgEnableManifest=true
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
