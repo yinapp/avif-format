@@ -21,20 +21,43 @@ jobs:
         submodules: recursive
         fetch-depth: 0
 
-    # 1. 显式调用官方 vcpkg 机制，强制在编译前完美恢复 vcpkg.json 中的所有第三方依赖
+    # 1. 正常运行 vcpkg 清单模式恢复依赖（这一步在虚拟机里生成真实的头文件和静态库）
     - name: Run vcpkg to restore dependencies
       uses: lukka/run-vcpkg@v11
       with:
         vcpkgJsonGlob: './vcpkg.json'
 
-    # 2. 生成完善的 Photoshop SDK 替代存根（加入关键的 PIFormat.h 和核心数据结构）
+    # 2. 精准截获 vcpkg 资源并伪装硬编码的 3rd-party 物理目录
+    - name: Fix Hardcoded Third-Party Directories
+      shell: powershell
+      run: |
+        # 创建项目硬编码寻找的相对路径
+        New-Item -ItemType Directory -Force -Path "3rd-party/libheif/libheif"
+        New-Item -ItemType Directory -Force -Path "3rd-party/libheif/build-x64"
+        New-Item -ItemType Directory -Force -Path "3rd-party/aom"
+
+        # 从 vcpkg 的安装副本中把 heif.h 等核心头文件抄过来
+        $vcpkgInstalledPath = "$env:VCPKG_ROOT\installed\x64-windows\include"
+        if (Test-Path "$vcpkgInstalledPath\libheif") {
+            Copy-Item -Path "$vcpkgInstalledPath\libheif\*" -Destination "3rd-party/libheif/libheif" -Recurse -Force
+            # 兼容有些源码直接 #include "libheif/heif.h" 或者 #include "heif.h"
+            Copy-Item -Path "$vcpkgInstalledPath\libheif\*" -Destination "3rd-party/libheif" -Recurse -Force
+            echo "Successfully mapped libheif headers from vcpkg."
+        }
+
+        # 顺便把 lcms2.h 塞进全局能访问到的本地 SDK 中，解决色彩管理报错
+        if (Test-Path "$vcpkgInstalledPath\lcms2.h") {
+            Copy-Item -Path "$vcpkgInstalledPath\lcms2.h" -Destination "3rd-party/libheif/" -Force
+            echo "Successfully mapped lcms2 headers."
+        }
+
+    # 3. 补齐 Photoshop SDK 全部残缺头文件（含本次新暴露的 PIAbout.h）
     - name: Generate Local Photoshop Stub Headers
       shell: powershell
       run: |
         $sdkPath = "${{ github.workspace }}\local-ps-sdk"
         New-Item -ItemType Directory -Force -Path $sdkPath
 
-        # 基础宏定义
         $pidDef = @"
         #ifndef __PIDEFINES_H__
         #define __PIDEFINES_H__
@@ -49,7 +72,6 @@ jobs:
         "@
         Set-Content -Path "$sdkPath\PIDefines.h" -Value $pidDef
 
-        # 核心数据类型
         $piTypes = @"
         #ifndef __PITYPES_H__
         #define __PITYPES_H__
@@ -71,13 +93,10 @@ jobs:
         "@
         Set-Content -Path "$sdkPath\PITypes.h" -Value $piTypes
 
-        # 核心文件格式插件结构体定义（破除 PIFormat.h 阻碍）
         $piFormat = @"
         #ifndef __PIFORMAT_H__
         #define __PIFORMAT_H__
         #include "PITypes.h"
-        
-        // 伪造插件所需的核心 Record 结构体
         typedef struct FormatRecord {
             int32_t  serialNumber;
             void*    platformData;
@@ -86,24 +105,41 @@ jobs:
             int16_t  imageSizeX;
             int16_t  depth;
             int16_t  planes;
-            // 保持基本对齐
             char     reserved[256];
         } FormatRecord, *FormatRecordPtr;
-        
         #endif
         "@
         Set-Content -Path "$sdkPath\PIFormat.h" -Value $piFormat
 
-        # 其余关联头文件空占位防护
+        # 补齐关于对话框所需的关键头文件桩 PIAbout.h
+        $piAbout = @"
+        #ifndef __PIABOUT_H__
+        #define __PIABOUT_H__
+        #include "PITypes.h"
+        typedef struct AboutRecord {
+            void* platformData;
+            char  reserved[128];
+        } AboutRecord, *AboutRecordPtr;
+        #endif
+        "@
+        Set-Content -Path "$sdkPath\PIAbout.h" -Value $piAbout
+
+        # 补齐其他常见关联桩
         @("PITerminology.h", "PIActions.h", "PIGeneral.h", "PIProperties.h") | ForEach-Object {
             $name = $_
             $macro = "__" + $name.Replace(".", "_").ToUpper() + "__"
             Set-Content -Path "$sdkPath\$name" -Value "#ifndef $macro`n#define $macro`n#endif"
         }
 
-        # 双向覆盖，确保万无一失
+        # 暴力多路分发，让项目自带的包含路径和我们附加的路径都能吃饱
         Copy-Item -Path "$sdkPath\*" -Destination "src\common\" -Force
-        echo "Photoshop Stub headers generated with PIFormat support."
+        
+        # 伪装硬编码的 Photoshop SDK 包含路径，直接阻断原工程配置的干扰
+        $hardcodedPsDir = "3rd-party/adobe_photoshop_sdk/pluginsdk/photoshopapi/photoshop"
+        New-Item -ItemType Directory -Force -Path $hardcodedPsDir
+        Copy-Item -Path "$sdkPath\*" -Destination $hardcodedPsDir -Force
+        
+        echo "Photoshop Stub headers perfectly dispatched."
 
     - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v2
@@ -111,9 +147,9 @@ jobs:
     - name: Restore NuGet Packages
       run: nuget restore vs/AvifFormat.sln
 
-    # 3. 编译阶段：通过 VcpkgEnableManifest 强行让 MSBuild 吞下已下载好的三方库
+    # 4. 执行最终编译：将本地 SDK、vcpkg 路径以及伪装的本地 3rd-party 同时做附加包含
     - name: Build Solution
       run: |
-        msbuild vs/AvifFormat.sln /p:Configuration=Release /p:Platform=x64 /t:Build /p:BuildInParallel=true /v:n /p:AdditionalIncludeDirectories="${{ github.workspace }}\local-ps-sdk" /p:VcpkgEnableManifest=true
+        msbuild vs/AvifFormat.sln /p:Configuration=Release /p:Platform=x64 /t:Build /p:BuildInParallel=true /v:n /p:AdditionalIncludeDirectories="${{ github.workspace }}\local-ps-sdk;${{ github.workspace }}\3rd-party\libheif"
       env:
         PhotoshopSDKDir: ${{ github.workspace }}\local-ps-sdk\
