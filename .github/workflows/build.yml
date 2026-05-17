@@ -21,15 +21,25 @@ jobs:
         submodules: recursive
         fetch-depth: 0
 
-    # 核心破局点：前方加上了正确的连字符 - 确保 YAML 语法 100% 正确
+    # 1. 补齐原作者打包的必备第三方依赖库（包含 lcms2 和 libheif/aom 源码及头文件）
+    - name: Clone Required Third-Party Dependencies
+      shell: powershell
+      run: |
+        # 创建 3rd-party 目录并拉取必需的解码依赖
+        New-Item -ItemType Directory -Force -Path "3rd-party"
+        git clone --depth=1 https://github.com/0xC0000054/libheif.git 3rd-party/libheif
+        git clone --depth=1 https://github.com/0xC0000054/aom.git 3rd-party/aom
+        # 顺便用 vcpkg 极速安装 lcms2 以提供 lcms2.h
+        vcpkg install lcms2:x64-windows
+
+    # 2. 生成能够满足 C++ 源码编译所需的 Photoshop 核心类型存根
     - name: Generate Local Photoshop Stub Headers
       shell: powershell
       run: |
-        # 创建临时的全局包含目录
         $sdkPath = "${{ github.workspace }}\local-ps-sdk"
         New-Item -ItemType Directory -Force -Path $sdkPath
 
-        # 1. 动态生成 PIDefines.h
+        # 基础定义
         $pidDef = @"
         #ifndef __PIDEFINES_H__
         #define __PIDEFINES_H__
@@ -44,33 +54,38 @@ jobs:
         "@
         Set-Content -Path "$sdkPath\PIDefines.h" -Value $pidDef
 
-        # 2. 动态生成 PITerminology.h
-        $piTerm = @"
-        #ifndef __PITERMINOLOGY_H__
-        #define __PITERMINOLOGY_H__
+        # C++ 源码所需的关键核心数据类型定义（补齐 PITypes.h）
+        $piTypes = @"
+        #ifndef __PITYPES_H__
+        #define __PITYPES_H__
+        #include <stdint.h>
+        typedef int32_t int32;
+        typedef uint32_t uint32;
+        typedef int16_t int16;
+        typedef uint16_t uint16;
+        typedef int8_t int8;
+        typedef uint8_t uint8;
+        typedef int32_t SPErr;
+        typedef void* PIActionDescriptor;
+        typedef struct Procs *PITypeVoid;
+        #ifndef MAC_env
+        typedef char * Ptr;
+        typedef char ** Handle;
+        #endif
         #endif
         "@
-        Set-Content -Path "$sdkPath\PITerminology.h" -Value $piTerm
+        Set-Content -Path "$sdkPath\PITypes.h" -Value $piTypes
 
-        # 3. 动态生成 PIActions.h
-        $piAct = @"
-        #ifndef __PIACTIONS_H__
-        #define __PIACTIONS_H__
-        #endif
-        "@
-        Set-Content -Path "$sdkPath\PIActions.h" -Value $piAct
+        # 空占位头文件，用于阻止 #include 报错
+        @("PITerminology.h", "PIActions.h", "PIGeneral.h", "PIProperties.h") | ForEach-Object {
+            $name = $_
+            $macro = "__" + $name.Replace(".", "_").ToUpper() + "__"
+            Set-Content -Path "$sdkPath\$name" -Value "#ifndef $macro`n#define $macro`n#endif"
+        }
 
-        # 4. 动态生成 PIGeneral.h
-        $piGen = @"
-        #ifndef __PIGENERAL_H__
-        #define __PIGENERAL_H__
-        #endif
-        "@
-        Set-Content -Path "$sdkPath\PIGeneral.h" -Value $piGen
-
-        # 5. 复制到源码目录实施本地覆盖
+        # 暴力双向覆盖
         Copy-Item -Path "$sdkPath\*" -Destination "src\common\" -Force
-        echo "All Photoshop Stub SDK headers deployed locally."
+        echo "All advanced Photoshop Stub headers generated."
 
     - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v2
@@ -78,9 +93,10 @@ jobs:
     - name: Restore NuGet Packages
       run: nuget restore vs/AvifFormat.sln
 
+    # 3. 编译阶段：同时引入本地 SDK 路径和 vcpkg 的头文件路径
     - name: Build Solution
       run: |
-        msbuild vs/AvifFormat.sln /p:Configuration=Release /p:Platform=x64 /t:Build /p:BuildInParallel=true /v:n /p:AdditionalIncludeDirectories="${{ github.workspace }}\local-ps-sdk"
+        msbuild vs/AvifFormat.sln /p:Configuration=Release /p:Platform=x64 /t:Build /p:BuildInParallel=true /v:n /p:AdditionalIncludeDirectories="${{ github.workspace }}\local-ps-sdk;C:\vcpkg\installed\x64-windows\include"
       env:
         PhotoshopSDKDir: ${{ github.workspace }}\local-ps-sdk\
 
@@ -91,5 +107,3 @@ jobs:
         path: |
           vs/x64/Release/AvifFormat.8bi
           vs/Release/AvifFormat.8bi
-          vs/x64/Release/Av1Image.8bi
-          vs/Release/Av1Image.8bi
