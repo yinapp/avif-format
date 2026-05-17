@@ -1,66 +1,36 @@
-name: Build Photoshop AVIF Plugin
+Run msbuild vs/AvifFormat.sln /p:Configuration=Release /p:Platform=x64 /t:Build /p:BuildInParallel=true /v:n
+MSBuild version 17.14.40+3e7442088 for .NET Framework
+Build started 5/17/2026 2:57:54 AM.
 
-on:
-  push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
-  workflow_dispatch:
+Project "D:\a\avif-format\avif-format\vs\AvifFormat.sln" on node 1 (Build target(s)).
+ValidateSolutionConfiguration:
+  Building solution configuration "Release|x64".
+Project "D:\a\avif-format\avif-format\vs\AvifFormat.sln" (1) is building "D:\a\avif-format\avif-format\vs\AvifFormat.vcxproj" (2) on node 1 (default targets).
+PrepareForBuild:
+  Creating directory "x64\Release\".
+  Creating directory "x64\Release\AvifFormat.tlog\".
+InitializeBuildStatus:
+  Creating "x64\Release\AvifFormat.tlog\unsuccessfulbuild" because "AlwaysCreate" was specified.
+  Touching "x64\Release\AvifFormat.tlog\unsuccessfulbuild".
+CustomBuild:
+  Performing Custom Build Tools
+  Microsoft (R) C/C++ Optimizing Compiler Version 19.29.30159 for x64
+  Copyright (C) Microsoft Corporation.  All rights reserved.
+  
+  AvifFormat.r
+D:\a\avif-format\avif-format\src\common\AvifFormatTerminology.h(24): fatal error C1083: Cannot open include file: 'PITerminology.h': No such file or directory [D:\a\avif-format\avif-format\vs\AvifFormat.vcxproj]
+  The system cannot find the path specified.
+C:\Program Files\Microsoft Visual Studio\2022\Enterprise\MSBuild\Microsoft\VC\v160\Microsoft.CppCommon.targets(241,5): error MSB8066: Custom build for '..\src\common\AvifFormat.r' exited with code -1. [D:\a\avif-format\avif-format\vs\AvifFormat.vcxproj]
+Done Building Project "D:\a\avif-format\avif-format\vs\AvifFormat.vcxproj" (default targets) -- FAILED.
+Done Building Project "D:\a\avif-format\avif-format\vs\AvifFormat.sln" (Build target(s)) -- FAILED.
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+Build FAILED.
 
-jobs:
-  build:
-    runs-on: windows-2022
+"D:\a\avif-format\avif-format\vs\AvifFormat.sln" (Build target) (1) ->
+"D:\a\avif-format\avif-format\vs\AvifFormat.vcxproj" (default target) (2) ->
+(CustomBuild target) -> 
+  D:\a\avif-format\avif-format\src\common\AvifFormatTerminology.h(24): fatal error C1083: Cannot open include file: 'PITerminology.h': No such file or directory [D:\a\avif-format\avif-format\vs\AvifFormat.vcxproj]
+  C:\Program Files\Microsoft Visual Studio\2022\Enterprise\MSBuild\Microsoft\VC\v160\Microsoft.CppCommon.targets(241,5): error MSB8066: Custom build for '..\src\common\AvifFormat.r' exited with code -1. [D:\a\avif-format\avif-format\vs\AvifFormat.vcxproj]
 
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        submodules: recursive
-        fetch-depth: 0
-
-    # 1. 核心大招：在本地直接动态创建一模一样的 PIDefines.h 伪装文件
-    # 这样资源编译器就能顺利通过，不再依赖任何外部下载
-    - name: Polyfill Photoshop SDK Header
-      shell: powershell
-      run: |
-        $headerContent = @"
-        #ifndef __PIDEFINES_H__
-        #define __PIDEFINES_H__
-        
-        #ifndef MSWindows
-        #define MSWindows 1
-        #endif
-        
-        #ifndef Windows
-        #define Windows 1
-        #endif
-        
-        #endif // __PIDEFINES_H__
-        "@
-        # 写入到源码查找头文件的对应目录下
-        Set-Content -Path "src/common/PIDefines.h" -Value $headerContent
-        echo "PIDefines.h polyfill created successfully."
-
-    - name: Setup MSBuild
-      uses: microsoft/setup-msbuild@v2
-
-    - name: Restore NuGet Packages
-      run: nuget restore vs/AvifFormat.sln
-
-    # 2. 干净编译，让 MSBuild 在项目根目录下自行检索
-    - name: Build Solution
-      run: |
-        msbuild vs/AvifFormat.sln /p:Configuration=Release /p:Platform=x64 /t:Build /p:BuildInParallel=true /v:n
-
-    - name: Upload Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: AvifFormat_x64_Compiled
-        path: |
-          vs/x64/Release/AvifFormat.8bi
-          vs/Release/AvifFormat.8bi
-          vs/x64/Release/Av1Image.8bi
-          vs/Release/Av1Image.8bi
+    0 Warning(s)
+    2 Error(s)
