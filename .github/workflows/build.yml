@@ -21,13 +21,20 @@ jobs:
         submodules: recursive
         fetch-depth: 0
 
-    # 1. 依然保留我们本地生成的 Stub 头文件，用于平替缺失的官方 SDK
+    # 1. 显式调用官方 vcpkg 机制，强制在编译前完美恢复 vcpkg.json 中的所有第三方依赖
+    - name: Run vcpkg to restore dependencies
+      uses: lukka/run-vcpkg@v11
+      with:
+        vcpkgJsonGlob: './vcpkg.json'
+
+    # 2. 生成完善的 Photoshop SDK 替代存根（加入关键的 PIFormat.h 和核心数据结构）
     - name: Generate Local Photoshop Stub Headers
       shell: powershell
       run: |
         $sdkPath = "${{ github.workspace }}\local-ps-sdk"
         New-Item -ItemType Directory -Force -Path $sdkPath
 
+        # 基础宏定义
         $pidDef = @"
         #ifndef __PIDEFINES_H__
         #define __PIDEFINES_H__
@@ -42,6 +49,7 @@ jobs:
         "@
         Set-Content -Path "$sdkPath\PIDefines.h" -Value $pidDef
 
+        # 核心数据类型
         $piTypes = @"
         #ifndef __PITYPES_H__
         #define __PITYPES_H__
@@ -63,14 +71,39 @@ jobs:
         "@
         Set-Content -Path "$sdkPath\PITypes.h" -Value $piTypes
 
+        # 核心文件格式插件结构体定义（破除 PIFormat.h 阻碍）
+        $piFormat = @"
+        #ifndef __PIFORMAT_H__
+        #define __PIFORMAT_H__
+        #include "PITypes.h"
+        
+        // 伪造插件所需的核心 Record 结构体
+        typedef struct FormatRecord {
+            int32_t  serialNumber;
+            void*    platformData;
+            int16_t  imageMode;
+            int16_t  imageSizeY;
+            int16_t  imageSizeX;
+            int16_t  depth;
+            int16_t  planes;
+            // 保持基本对齐
+            char     reserved[256];
+        } FormatRecord, *FormatRecordPtr;
+        
+        #endif
+        "@
+        Set-Content -Path "$sdkPath\PIFormat.h" -Value $piFormat
+
+        # 其余关联头文件空占位防护
         @("PITerminology.h", "PIActions.h", "PIGeneral.h", "PIProperties.h") | ForEach-Object {
             $name = $_
             $macro = "__" + $name.Replace(".", "_").ToUpper() + "__"
             Set-Content -Path "$sdkPath\$name" -Value "#ifndef $macro`n#define $macro`n#endif"
         }
 
+        # 双向覆盖，确保万无一失
         Copy-Item -Path "$sdkPath\*" -Destination "src\common\" -Force
-        echo "Photoshop Stub headers generated."
+        echo "Photoshop Stub headers generated with PIFormat support."
 
     - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v2
@@ -78,20 +111,9 @@ jobs:
     - name: Restore NuGet Packages
       run: nuget restore vs/AvifFormat.sln
 
-    # 2. 编译核心：不再手动去 pull 任何第三方依赖，通过关键参数激活微软自带的 vcpkg 集成编译链
+    # 3. 编译阶段：通过 VcpkgEnableManifest 强行让 MSBuild 吞下已下载好的三方库
     - name: Build Solution
       run: |
-        msbuild vs/AvifFormat.sln /p:Configuration=Release /p:Platform=x64 /t:Build /p:BuildInParallel=true /v:n /p:AdditionalIncludeDirectories="${{ github.workspace }}\local-ps-sdk" /p:ForceVcpkgManifestEdit=true
+        msbuild vs/AvifFormat.sln /p:Configuration=Release /p:Platform=x64 /t:Build /p:BuildInParallel=true /v:n /p:AdditionalIncludeDirectories="${{ github.workspace }}\local-ps-sdk" /p:VcpkgEnableManifest=true
       env:
         PhotoshopSDKDir: ${{ github.workspace }}\local-ps-sdk\
-        X_VCPKG_REGISTRIES_CACHE: ${{ github.workspace }}\.vcpkg-cache
-
-    - name: Upload Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: AvifFormat_x64_Compiled
-        path: |
-          vs/x64/Release/AvifFormat.8bi
-          vs/Release/AvifFormat.8bi
-          vs/x64/Release/Av1Image.8bi
-          vs/Release/Av1Image.8bi
