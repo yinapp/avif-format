@@ -18,38 +18,34 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 1. 真正激活并缓存 vcpkg 依赖
-      - name: Restore vcpkg artifacts locally
-        shell: pwsh
-        run: |
-          Write-Output "Integrating vcpkg with MSBuild..."
-          # 显式激活 vcpkg 的全局集成，让 MSBuild 能够自动识别 vcpkg.json
-          vcpkg integrate install
-          
-          Write-Output "Triggering vcpkg manifest install..."
-          # 强行触发一次清单模式安装，确保 vcpkg_installed 目录在编译前生成
-          vcpkg install --triplet=x64-windows
+      # 1. 强制设定虚拟机内置的 CMake 和系统环境到最新状态
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      # 2. 使用官方推荐的 action 自动搞定 vcpkg 的依赖集成与版本校验
+      - name: Run vcpkg to install dependencies
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgDirectory: 'C:/vcpkg' # 锁定虚拟机自带的全局 vcpkg 路径
+          vcpkgJsonGlob: '**/vcpkg.json'
+          runVcpkgInstall: true
 
       - name: Fix Hardcoded Third-Party Directories
         shell: pwsh
         run: |
-          # 定义清晰的绝对路径
           $workspace = "${{ github.workspace }}"
           $vcpkgInclude = Join-Path $workspace "vcpkg_installed\x64-windows\include"
           $targetDir = Join-Path $workspace "3rd-party\libheif"
           
-          # 如果 vcpkg 目录不存在，创建空目录以防报错
           if (!(Test-Path $vcpkgInclude)) {
               Write-Warning "Vcpkg include directory not found. Creating empty path."
               New-Item -ItemType Directory -Force -Path $vcpkgInclude | Out-Null
           }
           
-          # 确保目标目录存在
           if (!(Test-Path $targetDir)) {
               New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
           }
           
-          # 安全增量复制头文件，绝不执行删除
           Write-Output "Copying headers from $vcpkgInclude to $targetDir ..."
           Copy-Item -Path "$vcpkgInclude\*" -Destination $targetDir -Recurse -Force -ErrorAction SilentlyContinue
           
@@ -58,9 +54,6 @@ jobs:
       - name: Generate Local Photoshop Stub Headers
         run: |
           echo "Generating Photoshop stub headers..."
-
-      - name: Setup MSBuild
-        uses: microsoft/setup-msbuild@v2
 
       - name: Restore NuGet Packages
         run: msbuild AvifFormat.sln /t:Restore /p:VcpkgEnableManifest=true
