@@ -62,17 +62,11 @@ jobs:
         uses: microsoft/setup-msbuild@v2
 
       - name: Restore NuGet Packages
-        # 显式切入到当前工作区，并执行标准还原
-        margin: 0
+        # 移除了错误的 margin 属性，并直接执行标准的 sln 还原
         run: msbuild AvifFormat.sln /t:Restore /p:VcpkgEnableManifest=true
-        env:
-          GITHUB_CONTEXT: ${{ github.workspace }}
 
       - name: Build Solution
-        # 显式切入到当前工作区，并执行 Release 编译
         run: msbuild AvifFormat.sln /p:Configuration=Release /p:Platform=x64 /p:VcpkgEnableManifest=true
-        env:
-          GITHUB_CONTEXT: ${{ github.workspace }}
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
