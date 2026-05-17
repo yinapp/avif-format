@@ -62,11 +62,34 @@ jobs:
         uses: microsoft/setup-msbuild@v2
 
       - name: Restore NuGet Packages
-        # 移除了错误的 margin 属性，并直接执行标准的 sln 还原
-        run: msbuild AvifFormat.sln /t:Restore /p:VcpkgEnableManifest=true
+        shell: pwsh
+        run: |
+          # 强制切换到 GitHub 绝对工作区根目录，粉碎工作路径偏移
+          Set-Location "${{ github.workspace }}"
+          
+          # 现场人肉校验文件是否存在，并打印 debug 信息
+          $slnFile = "AvifFormat.sln"
+          if (Test-Path $slnFile) {
+              Write-Output "[DEBUG] Successfully found solution file at: $(Get-Item $slnFile).FullName"
+          } else {
+              Write-Error "[DEBUG] Fatal error: AvifFormat.sln cannot be found in ${{ github.workspace }}!"
+              Write-Output "[DEBUG] Current directory items:"
+              Get-ChildItem
+              exit 1
+          }
+          
+          # 使用绝对路径调用 MSBuild 还原
+          msbuild "$slnFile" /t:Restore /p:VcpkgEnableManifest=true
 
       - name: Build Solution
-        run: msbuild AvifFormat.sln /p:Configuration=Release /p:Platform=x64 /p:VcpkgEnableManifest=true
+        shell: pwsh
+        run: |
+          # 同样强行锁死根目录
+          Set-Location "${{ github.workspace }}"
+          $slnFile = "AvifFormat.sln"
+          
+          # 使用绝对路径调用 MSBuild 编译
+          msbuild "$slnFile" /p:Configuration=Release /p:Platform=x64 /p:VcpkgEnableManifest=true
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
