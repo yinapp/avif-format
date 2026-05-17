@@ -7,6 +7,9 @@ on:
     branches: [ "main" ]
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build:
     runs-on: windows-2022
@@ -15,25 +18,28 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
-        submodules: recursive # 必须递归拉取子模块
-        fetch-depth: 0        # 完整拉取历史，防止依赖部分丢失
+        submodules: recursive
+        fetch-depth: 0
 
     - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v2
 
+    # 1. 修正解决方案文件名（改为 AvifFormat.sln）
     - name: Restore NuGet Packages
-      run: nuget restore vs/AVIFImage.sln
+      run: nuget restore vs/AvifFormat.sln
 
-    # 如果有预编译事件或子依赖，让 MSBuild 在编译总项目前自己分析并解决
-    - name: Build Solution with Dependencies
+    # 2. 修正编译目标文件名
+    - name: Build Solution
       run: |
-        msbuild vs/AVIFImage.sln /p:Configuration=Release /p:Platform=x64 /t:Build /p:BuildInParallel=true
+        msbuild vs/AvifFormat.sln /p:Configuration=Release /p:Platform=x64 /t:Build /p:BuildInParallel=true /v:n
 
+    # 3. 收集编译生成的插件产物
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
         name: AvifFormat_x64_Compiled
         path: |
+          vs/x64/Release/AvifFormat.8bi
+          vs/Release/AvifFormat.8bi
           vs/x64/Release/Av1Image.8bi
           vs/Release/Av1Image.8bi
-          bin/x64/Release/Av1Image.8bi
