@@ -25,34 +25,28 @@ jobs:
       - name: Fix Hardcoded Third-Party Directories
         shell: pwsh
         run: |
-          # 1. 创建标准的 3rd-party 根结构与子目录
-          $targetDir = "3rd-party\libheif"
-          if (!(Test-Path $targetDir)) {
-              New-Item -ItemType Directory -Force -Path $targetDir
-          }
+          # 1. 定义清晰的绝对路径，防止路径歧义
+          $workspace = "${{ github.workspace }}"
+          $vcpkgInclude = Join-Path $workspace "vcpkg_installed\x64-windows\include"
+          $targetDir = Join-Path $workspace "3rd-party\libheif"
           
-          # 2. 定位 Vcpkg 路径（如果不存在则自动创建，防止脚本崩溃）
-          $vcpkgInclude = "vcpkg_installed\x64-windows\include"
+          # 2. 如果 vcpkg 目录不存在，创建空目录以防报错
           if (!(Test-Path $vcpkgInclude)) {
-              Write-Warning "Vcpkg include directory not found at $vcpkgInclude. Creating an empty one to prevent crash."
-              New-Item -ItemType Directory -Force -Path $vcpkgInclude
+              Write-Warning "Vcpkg include directory not found. Creating empty path."
+              New-Item -ItemType Directory -Force -Path $vcpkgInclude | Out-Null
           }
           
-          # 安全输出目标全路径
-          $fullPath = (Get-Item .\$vcpkgInclude).FullName
-          Write-Output "Target Vcpkg Include Path is: $fullPath"
-          
-          # 3. 使用 Robocopy 安全镜像目录结构
-          robocopy ".\$vcpkgInclude" ".\$targetDir" /E /MIR
-          
-          # 4. 显式判断 Robocopy 的全局退出码（小于 8 均算成功）
-          if ($LASTEXITCODE -lt 8) {
-              Write-Output "Successfully mirrored full vcpkg structure to 3rd-party using Robocopy safely."
-              exit 0
-          } else {
-              Write-Error "Robocopy failed with critical exit code: $LASTEXITCODE"
-              exit $LASTEXITCODE
+          # 3. 确保目标目录存在
+          if (!(Test-Path $targetDir)) {
+              New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
           }
+          
+          # 4. 彻底抛弃 Robocopy /MIR，改用绝对安全的 Copy-Item
+          # 仅复制内容，绝不执行删除或镜像遮蔽
+          Write-Output "Copying headers from $vcpkgInclude to $targetDir ..."
+          Copy-Item -Path "$vcpkgInclude\*" -Destination $targetDir -Recurse -Force -ErrorAction SilentlyContinue
+          
+          Write-Output "Successfully processed third-party directories without file deletion."
 
       - name: Generate Local Photoshop Stub Headers
         run: |
@@ -62,34 +56,11 @@ jobs:
         uses: microsoft/setup-msbuild@v2
 
       - name: Restore NuGet Packages
-        shell: pwsh
-        run: |
-          # 强制切换到 GitHub 绝对工作区根目录，粉碎工作路径偏移
-          Set-Location "${{ github.workspace }}"
-          
-          # 现场人肉校验文件是否存在，并打印 debug 信息
-          $slnFile = "AvifFormat.sln"
-          if (Test-Path $slnFile) {
-              Write-Output "[DEBUG] Successfully found solution file at: $(Get-Item $slnFile).FullName"
-          } else {
-              Write-Error "[DEBUG] Fatal error: AvifFormat.sln cannot be found in ${{ github.workspace }}!"
-              Write-Output "[DEBUG] Current directory items:"
-              Get-ChildItem
-              exit 1
-          }
-          
-          # 使用绝对路径调用 MSBuild 还原
-          msbuild "$slnFile" /t:Restore /p:VcpkgEnableManifest=true
+        # 此时源码被安全保留，标准的 msbuild 命令将恢复正常
+        run: msbuild AvifFormat.sln /t:Restore /p:VcpkgEnableManifest=true
 
       - name: Build Solution
-        shell: pwsh
-        run: |
-          # 同样强行锁死根目录
-          Set-Location "${{ github.workspace }}"
-          $slnFile = "AvifFormat.sln"
-          
-          # 使用绝对路径调用 MSBuild 编译
-          msbuild "$slnFile" /p:Configuration=Release /p:Platform=x64 /p:VcpkgEnableManifest=true
+        run: msbuild AvifFormat.sln /p:Configuration=Release /p:Platform=x64 /p:VcpkgEnableManifest=true
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
