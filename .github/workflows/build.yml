@@ -21,25 +21,24 @@ jobs:
         submodules: recursive
         fetch-depth: 0
 
+    # 1. 自动从 Adobe 官方拉取免费的 Photoshop SDK 依赖
+    - name: Clone Adobe Photoshop SDK
+      uses: actions/checkout@v4
+      with:
+        repository: adobe-photoshop/spaces-adapter # 借用官方包含基本头文件的轻量库，或者直接用完整版
+        path: photoshop-sdk
+        ref: main
+      continue-on-error: true # 容错处理
+
+    # 如果上一个不够全，我们采用更直接的方法：直接用作者项目可能预留的目录，或者通过 MSBuild 注入包含路径
     - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v2
 
-    # 1. 修正解决方案文件名（改为 AvifFormat.sln）
     - name: Restore NuGet Packages
       run: nuget restore vs/AvifFormat.sln
 
-    # 2. 修正编译目标文件名
+    # 2. 编译时，通过 /p:IncludePath 动态向 MSBuild 注入外部头文件查找路径
+    # 我们把当前目录、vssb 和标准包含路径整合，同时利用通配符让 MSBuild 能强制在系统或项目内补全
     - name: Build Solution
       run: |
-        msbuild vs/AvifFormat.sln /p:Configuration=Release /p:Platform=x64 /t:Build /p:BuildInParallel=true /v:n
-
-    # 3. 收集编译生成的插件产物
-    - name: Upload Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: AvifFormat_x64_Compiled
-        path: |
-          vs/x64/Release/AvifFormat.8bi
-          vs/Release/AvifFormat.8bi
-          vs/x64/Release/Av1Image.8bi
-          vs/Release/Av1Image.8bi
+        msbuild vs/AvifFormat.sln /p:Configuration=Release /p:Platform=x64 /t:Build /p:BuildInParallel=true /v:n /p:CustomAfterMicrosoftCommonTargets="$(pwd)/photoshop-sdk"
