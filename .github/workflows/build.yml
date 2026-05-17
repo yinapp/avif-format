@@ -47,7 +47,7 @@ jobs:
           
           # 4. 显式判断 Robocopy 的全局退出码（小于 8 均算成功）
           if ($LASTEXITCODE -lt 8) {
-              Write-Output "Successfully mirrored full vkg structure to 3rd-party using Robocopy safely."
+              Write-Output "Successfully mirrored full vcpkg structure to 3rd-party using Robocopy safely."
               exit 0
           } else {
               Write-Error "Robocopy failed with critical exit code: $LASTEXITCODE"
@@ -62,23 +62,17 @@ jobs:
         uses: microsoft/setup-msbuild@v2
 
       - name: Restore NuGet Packages
-        shell: pwsh
-        run: |
-          # 动态获取当前工作区下真实的 .sln 绝对路径
-          $slnPath = (Get-ChildItem "${{ github.workspace }}\*.sln" -File | Select-Object -First 1).FullName
-          Write-Output "Found Solution Path: $slnPath"
-          
-          # 传给 MSBuild 执行还原
-          msbuild "$slnPath" /t:Restore /p:VcpkgEnableManifest=true
+        # 显式切入到当前工作区，并执行标准还原
+        margin: 0
+        run: msbuild AvifFormat.sln /t:Restore /p:VcpkgEnableManifest=true
+        env:
+          GITHUB_CONTEXT: ${{ github.workspace }}
 
       - name: Build Solution
-        shell: pwsh
-        run: |
-          # 动态获取当前工作区下真实的 .sln 绝对路径
-          $slnPath = (Get-ChildItem "${{ github.workspace }}\*.sln" -File | Select-Object -First 1).FullName
-          
-          # 传给 MSBuild 执行编译
-          msbuild "$slnPath" /p:Configuration=Release /p:Platform=x64 /p:VcpkgEnableManifest=true
+        # 显式切入到当前工作区，并执行 Release 编译
+        run: msbuild AvifFormat.sln /p:Configuration=Release /p:Platform=x64 /p:VcpkgEnableManifest=true
+        env:
+          GITHUB_CONTEXT: ${{ github.workspace }}
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
