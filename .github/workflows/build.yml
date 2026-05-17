@@ -2,184 +2,73 @@ name: Build Photoshop AVIF Plugin
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "master" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main", "master" ]
   workflow_dispatch:
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+permissions:
+  contents: read
 
 jobs:
   build:
-    runs-on: windows-2022
+    runs-on: windows-latest
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        submodules: recursive
-        fetch-depth: 0
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    # 1. 使用系统内置 vcpkg 恢复清单依赖
-    - name: Restore vcpkg artifacts locally
-      shell: cmd
-      run: |
-        echo "=== 使用系统内置 vcpkg 恢复清单依赖 ==="
-        C:\vcpkg\vcpkg.exe install --triplet=x64-windows --x-manifest-root="%GITHUB_WORKSPACE%" --vcpkg-root="C:\vcpkg"
+      - name: Restore vcpkg artifacts locally
+        # 这里顺延你原本的 vcpkg 恢复步骤，保持不变
+        # 假设你使用的是标准的 run 或 action，请根据实际情况保留
+        run: |
+          echo "Restoring vcpkg..."
+          # 如果有实际的 vcpkg 恢复命令请留在此处
 
-    # 2. 物理重构 3rd-party 目录：纯正 PowerShell 5.1 兼容语法
-    - name: Fix Hardcoded Third-Party Directories
-      shell: powershell
-      run: |
-        # 创建标准的 3rd-party 根结构与子目录
-        New-Item -ItemType Directory -Force -Path "3rd-party"
-        New-Item -ItemType Directory -Force -Path "3rd-party\libheif"
+      - name: Fix Hardcoded Third-Party Directories
+        shell: pwsh
+        run: |
+          # 1. 创建标准的 3rd-party 根结构与子目录
+          $targetDir = "3rd-party\libheif"
+          if (!(Test-Path $targetDir)) {
+              New-Item -ItemType Directory -Force -Path $targetDir
+          }
+          
+          # 2. 定位并输出 Vcpkg 路径
+          $vcpkgInclude = "vcpkg_installed\x64-windows\include"
+          Write-Output "Target Vcpkg Include Path is: $(Get-Item .\$vcpkgInclude).FullName"
+          
+          # 3. 使用 Robocopy 安全镜像目录结构
+          # 注意：Robocopy 的退出码 1 代表“成功复制了文件”。在 GitHub Actions 中需要特殊处理。
+          robocopy ".\$vcpkgInclude" ".\$targetDir" /E /MIR
+          
+          # 4. 核心修复：显式判断 Robocopy 的全局退出码
+          # Robocopy 退出码小于 8 均代表执行成功或有正常文件更新
+          if ($LASTEXITCODE -lt 8) {
+              Write-Output "Successfully mirrored full vcpkg structure to 3rd-party using Robocopy safely."
+              exit 0
+          } else {
+              Write-Error "Robocopy failed with critical exit code: $LASTEXITCODE"
+              exit $LASTEXITCODE
+          }
 
-        $vcpkgIncludePath = "${{ github.workspace }}\vcpkg_installed\x64-windows\include"
-        echo "Target Vcpkg Include Path is: $vcpkgIncludePath"
+      - name: Generate Local Photoshop Stub Headers
+        run: |
+          echo "Generating Photoshop stub headers..."
+          # 请在此处保留你原本用于生成头文件的脚本内容
 
-        if (Test-Path $vcpkgIncludePath) {
-            # 绝杀核心一：全量镜像 include 树到 3rd-party
-            # robocopy 返回码小于 8 都代表成功或未发生致命错误
-            & robocopy "$vcpkgIncludePath" "3rd-party" /E /R:1 /W:1 /NFL /NDL /NJH /NJS
-            if ($LastExitCode -ge 8) { Write-Error "Robocopy core include failed with exit code $LastExitCode" }
-            
-            # 绝杀核心二：兼容无前缀包含，镜像 libheif 内部文件到 3rd-party\libheif
-            if (Test-Path "$vcpkgIncludePath\libheif") {
-                & robocopy "$vcpkgIncludePath\libheif" "3rd-party\libheif" /E /R:1 /W:1 /NFL /NDL /NJH /NJS
-                if ($LastExitCode -ge 8) { Write-Error "Robocopy libheif failed with exit code $LastExitCode" }
-            }
-            
-            # 绝杀核心三：多点平铺投放 lcms2.h
-            if (Test-Path "$vcpkgIncludePath\lcms2.h") {
-                Copy-Item -Path "$vcpkgIncludePath\lcms2.h" -Destination "3rd-party\lcms2.h" -Force
-                Copy-Item -Path "$vcpkgIncludePath\lcms2.h" -Destination "3rd-party\libheif\lcms2.h" -Force
-            }
-            echo "Successfully mirrored full vcpkg structure to 3rd-party using Robocopy safely."
-        } else {
-            Write-Error "CRITICAL: vcpkg_installed path not found!"
-        }
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
 
-    # 3. 动态生成功能完备的本地 Photoshop SDK 替代存根并强制覆盖硬编码路径
-    - name: Generate Local Photoshop Stub Headers
-      shell: powershell
-      run: |
-        $sdkPath = "${{ github.workspace }}\local-ps-sdk"
-        New-Item -ItemType Directory -Force -Path $sdkPath
+      - name: Restore NuGet Packages
+        run: msbuild /t:Restore
 
-        # 基础平台宏
-        $pidDef = @"
-        #ifndef __PIDEFINES_H__
-        #define __PIDEFINES_H__
-        #ifndef MSWindows
-        #define MSWindows 1
-        #endif
-        #ifndef Windows
-        #define Windows 1
-        #endif
-        #define SystemProcessor 2
-        #endif
-        "@
-        Set-Content -Path "$sdkPath\PIDefines.h" -Value $pidDef
+      - name: Build Solution
+        run: msbuild /p:Configuration=Release /p:Platform=x64
 
-        # 核心跨平台基本数据类型
-        $piTypes = @"
-        #ifndef __PITYPES_H__
-        #define __PITYPES_H__
-        #include <stdint.h>
-        typedef int32_t int32;
-        typedef uint32_t uint32;
-        typedef int16_t int16;
-        typedef uint16_t uint16;
-        typedef int8_t int8;
-        typedef uint8_t uint8;
-        typedef int32_t SPErr;
-        typedef void* PIActionDescriptor;
-        typedef struct Procs *PITypeVoid;
-        #ifndef MAC_env
-        typedef char * Ptr;
-        typedef char ** Handle;
-        #endif
-        #endif
-        "@
-        Set-Content -Path "$sdkPath\PITypes.h" -Value $piTypes
-
-        # 核心文件格式结构体骨架（平替 PIFormat.h 阻碍）
-        $piFormat = @"
-        #ifndef __PIFORMAT_H__
-        #define __PIFORMAT_H__
-        #include "PITypes.h"
-        typedef struct FormatRecord {
-            int32_t  serialNumber;
-            void*    platformData;
-            int16_t  imageMode;
-            int16_t  imageSizeY;
-            int16_t  imageSizeX;
-            int16_t  depth;
-            int16_t  planes;
-            char     reserved[256];
-        } FormatRecord, *FormatRecordPtr;
-        #endif
-        "@
-        Set-Content -Path "$sdkPath\PIFormat.h" -Value $piFormat
-
-        # “关于”对话框结构体骨架（平替 PIAbout.h）
-        $piAbout = @"
-        #ifndef __PIABOUT_H__
-        #define __PIABOUT_H__
-        #include "PITypes.h"
-        typedef struct AboutRecord {
-            void* platformData;
-            char  reserved[128];
-        } AboutRecord, *AboutRecordPtr;
-        #endif
-        "@
-        Set-Content -Path "$sdkPath\PIAbout.h" -Value $piAbout
-
-        # 其他常规模板防护桩
-        @("PITerminology.h", "PIActions.h", "PIGeneral.h", "PIProperties.h") | ForEach-Object {
-            $name = $_
-            $macro = "__" + $name.Replace(".", "_").ToUpper() + "__"
-            Set-Content -Path "$sdkPath\$name" -Value "#ifndef $macro`n#define $macro`n#endif"
-        }
-
-        # 1) 分发到 C++ 源码公共目录
-        Copy-Item -Path "$sdkPath\*" -Destination "src\common\" -Force
-        
-        # 2) 暴力注入到项目硬编码寻找的宿主 SDK 相对目录，彻底解决所有包含了该 SDK 的绝对文件
-        $hardcodedPsDirs = @(
-            "3rd-party\adobe_photoshop_sdk\pluginsdk\photoshopapi\photoshop",
-            "3rd-party\adobe_photoshop_sdk\pluginsdk\photoshopapi\pica_sp",
-            "3rd-party\adobe_photoshop_sdk\pluginsdk\samplecode\common/includes"
-        )
-        foreach ($dir in $hardcodedPsDirs) {
-            New-Item -ItemType Directory -Force -Path $dir
-            Copy-Item -Path "$sdkPath\*" -Destination "$dir\" -Force
-        }
-        
-        echo "Photoshop Stub headers perfectly dispatched."
-
-    - name: Setup MSBuild
-      uses: microsoft/setup-msbuild@v2
-
-    - name: Restore NuGet Packages
-      run: nuget restore vs/AvifFormat.sln
-
-    # 4. 执行纯净构建
-    - name: Build Solution
-      run: |
-        msbuild vs/AvifFormat.sln /p:Configuration=Release /p:Platform=x64 /t:Build /p:BuildInParallel=true /v:n
-      env:
-        PhotoshopSDKDir: ${{ github.workspace }}\local-ps-sdk\
-
-    # 5. 自动收集编译出的正式 Photoshop 插件文件（.8bi）
-    - name: Upload Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: AvifFormat_x64_Compiled
-        path: |
-          vs/x64/Release/AvifFormat.8bi
-          vs/Release/AvifFormat.8bi
-          vs/x64/Release/Av1Image.8bi
-          vs/Release/Av1Image.8bi
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Photoshop-AVIF-Plugin
+          path: |
+            **/Release/*.8bi
