@@ -21,17 +21,13 @@ jobs:
         submodules: recursive
         fetch-depth: 0
 
-    # 1. 独立、干净地下载 Adobe 官方 Photoshop SDK 并解压
-    - name: Download and Extract Adobe Photoshop SDK
-      shell: powershell
-      run: |
-        $url = "https://download.adobe.com/pub/adobe/photoshop/cplusplus/win/Photoshop_2021_SDK_win.zip"
-        $output = "photoshop_sdk.zip"
-        echo "Downloading Adobe Photoshop SDK..."
-        Invoke-WebRequest -Uri $url -OutFile $output
-        echo "Extracting SDK..."
-        Expand-Archive -Path $output -DestinationPath "$env:USERPROFILE\photoshop-sdk"
-        echo "SDK ready at $env:USERPROFILE\photoshop-sdk"
+    # 1. 直接拉取第三方维护的、干净完整的 Photoshop SDK 头文件镜像（不再依赖 Adobe 官网链接）
+    - name: Clone Photoshop SDK Headers
+      uses: actions/checkout@v4
+      with:
+        repository: textmeshpro/photoshop-pluginsdk
+        path: photoshop-sdk-dir
+        ref: master
 
     - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v2
@@ -39,11 +35,12 @@ jobs:
     - name: Restore NuGet Packages
       run: nuget restore vs/AvifFormat.sln
 
-    # 2. 编译阶段：通过 env 注入宏，或者直接用 MSBuild 参数注入头文件路径（十拿九稳）
+    # 2. 正统解法：通过向环境变量注入 PhotoshopSDKDir，让作者的项目文件自动识别 SDK 路径
     - name: Build Solution
       run: |
-        msbuild vs/AvifFormat.sln /p:Configuration=Release /p:Platform=x64 /t:Build /p:BuildInParallel=true /v:n /p:AdditionalIncludeDirectories="$env:USERPROFILE\photoshop-sdk\pluginsdk\samplecode\common\includes"
-      shell: cmd
+        msbuild vs/AvifFormat.sln /p:Configuration=Release /p:Platform=x64 /t:Build /p:BuildInParallel=true /v:n
+      env:
+        PhotoshopSDKDir: ${{ github.workspace }}\photoshop-sdk-dir\
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
