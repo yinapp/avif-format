@@ -21,22 +21,21 @@ jobs:
         submodules: recursive
         fetch-depth: 0
 
-    # 1. 废弃 lukka 插件，直接用标准的系统级 vcpkg 强制在工作区内恢复依赖
+    # 1. 改用 cmd 执行本地依赖恢复，彻底解决 PowerShell 的字符串闭合和转义解析 Bug
     - name: Restore vcpkg artifacts locally
-      shell: powershell
+      shell: cmd
       run: |
         echo "=== 使用系统内置 vcpkg 恢复清单依赖 ==="
-        # 强制指定在当前工作区生成 vcpkg_installed 物理目录
-        C:\vcpkg\vcpkg.exe install --triplet=x64-windows --x-manifest-root="${{ github.workspace }}" --vcpkg-root="C:\vcpkg"
+        C:\vcpkg\vcpkg.exe install --triplet=x64-windows --x-manifest-root="%GITHUB_WORKSPACE%" --vcpkg-root="C:\vcpkg"
 
-    # 2. 物理重构 3rd-party 目录（此时 vcpkg_installed 必然存在于工作区）
+    # 2. 物理重构 3rd-party 目录
     - name: Fix Hardcoded Third-Party Directories
       shell: powershell
       run: |
         # 创建标准的 3rd-party 根结构
         New-Item -ItemType Directory -Force -Path "3rd-party"
 
-        # 此时显式声明由上一步生成的标准路径
+        # 显式声明由上一步生成的标准路径
         $vcpkgIncludePath = "${{ github.workspace }}\vcpkg_installed\x64-windows\include"
         echo "Target Vcpkg Include Path is: $vcpkgIncludePath"
 
