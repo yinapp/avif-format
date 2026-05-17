@@ -5,7 +5,7 @@ on:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
-  workflow_dispatch: # 允许你手动在网页上点击运行
+  workflow_dispatch:
 
 jobs:
   build:
@@ -15,17 +15,22 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
-        submodules: recursive # 自动拉取 3rd-party 中的子模块依赖（关键）
+        submodules: recursive # 确保拉取了所有子模块
 
     - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v2
 
-    - name: Navigate to workspace
-      run: cd vs
+    # 第一步：必须要先编译第三方依赖库 (libheif / aom 等)
+    - name: Build Third Party Dependencies
+      run: |
+        cd 3rd-party
+        ./builddeps.cmd
+      shell: cmd
 
     - name: Restore NuGet Packages
       run: nuget restore vs/AVIFImage.sln
 
+    # 第二步：再编译主体 Photoshop 插件
     - name: Build x64 Release
       run: msbuild vs/AVIFImage.sln /p:Configuration=Release /p:Platform=x64
 
