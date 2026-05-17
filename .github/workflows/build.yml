@@ -1,0 +1,38 @@
+name: Build Photoshop AVIF Plugin
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch: # 允许你手动在网页上点击运行
+
+jobs:
+  build:
+    runs-on: windows-2022
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive # 自动拉取 3rd-party 中的子模块依赖（关键）
+
+    - name: Setup MSBuild
+      uses: microsoft/setup-msbuild@v2
+
+    - name: Navigate to workspace
+      run: cd vs
+
+    - name: Restore NuGet Packages
+      run: nuget restore vs/AVIFImage.sln
+
+    - name: Build x64 Release
+      run: msbuild vs/AVIFImage.sln /p:Configuration=Release /p:Platform=x64
+
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: AvifFormat_x64_Compiled
+        path: |
+          vs/x64/Release/Av1Image.8bi
+          vs/Release/Av1Image.8bi
