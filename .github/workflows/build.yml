@@ -20,29 +20,26 @@ jobs:
         with:
           submodules: true
 
-      # 1. 配置 MSBuild 环境
+      # 1. 直接配置内置的 MSBuild 环境
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
-      # 2. 运行 vcpkg 安装依赖（注入环境变量，粉碎 x-gha 兼容死结）
-      - name: Run vcpkg to install dependencies
-        uses: lukka/run-vcpkg@v11
-        env:
-          # 核心修复：强行覆盖并清空 GitHub 动作注入的现代缓存源
-          # 防止 2022 年的老版本 vcpkg 遇到 "x-gha" 时崩溃
-          VCPKG_BINARY_SOURCES: 'clear'
-        with:
-          vcpkgDirectory: '${{ github.workspace }}/vcpkg-standalone'
-          vcpkgGitCommitId: 'e3a3942a9eb0cb47c12898e5fd819f258441b6f6'
-          vcpkgJsonGlob: '**/vcpkg.json'
-          runVcpkgInstall: true
+      # 2. 彻底抛弃第三方 action，直接用虚拟机自带的 vcpkg 一键安装（现代源，100% 能下载）
+      - name: Install Dependencies via Built-in vcpkg
+        shell: pwsh
+        run: |
+          # 激活全局集成
+          vcpkg integrate install
+          # 直接使用清单模式安装，由现代内置 vcpkg 托管下载源
+          vcpkg install --triplet=x64-windows
 
       # 3. 迁移头文件到项目硬编码预期的 3rd-party 目录
       - name: Fix Hardcoded Third-Party Directories
         shell: pwsh
         run: |
           $workspace = "${{ github.workspace }}"
-          $vcpkgInclude = Join-Path $workspace "vcpkg-standalone\vcpkg_installed\x64-windows\include"
+          # 路径回归标准的系统集成路径
+          $vcpkgInclude = Join-Path $workspace "vcpkg_installed\x64-windows\include"
           $targetDir = Join-Path $workspace "3rd-party\libheif"
           
           if (!(Test-Path $vcpkgInclude)) {
