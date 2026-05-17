@@ -1,36 +1,55 @@
-Run msbuild vs/AvifFormat.sln /p:Configuration=Release /p:Platform=x64 /t:Build /p:BuildInParallel=true /v:n
-MSBuild version 17.14.40+3e7442088 for .NET Framework
-Build started 5/17/2026 2:57:54 AM.
+name: Build Photoshop AVIF Plugin
 
-Project "D:\a\avif-format\avif-format\vs\AvifFormat.sln" on node 1 (Build target(s)).
-ValidateSolutionConfiguration:
-  Building solution configuration "Release|x64".
-Project "D:\a\avif-format\avif-format\vs\AvifFormat.sln" (1) is building "D:\a\avif-format\avif-format\vs\AvifFormat.vcxproj" (2) on node 1 (default targets).
-PrepareForBuild:
-  Creating directory "x64\Release\".
-  Creating directory "x64\Release\AvifFormat.tlog\".
-InitializeBuildStatus:
-  Creating "x64\Release\AvifFormat.tlog\unsuccessfulbuild" because "AlwaysCreate" was specified.
-  Touching "x64\Release\AvifFormat.tlog\unsuccessfulbuild".
-CustomBuild:
-  Performing Custom Build Tools
-  Microsoft (R) C/C++ Optimizing Compiler Version 19.29.30159 for x64
-  Copyright (C) Microsoft Corporation.  All rights reserved.
-  
-  AvifFormat.r
-D:\a\avif-format\avif-format\src\common\AvifFormatTerminology.h(24): fatal error C1083: Cannot open include file: 'PITerminology.h': No such file or directory [D:\a\avif-format\avif-format\vs\AvifFormat.vcxproj]
-  The system cannot find the path specified.
-C:\Program Files\Microsoft Visual Studio\2022\Enterprise\MSBuild\Microsoft\VC\v160\Microsoft.CppCommon.targets(241,5): error MSB8066: Custom build for '..\src\common\AvifFormat.r' exited with code -1. [D:\a\avif-format\avif-format\vs\AvifFormat.vcxproj]
-Done Building Project "D:\a\avif-format\avif-format\vs\AvifFormat.vcxproj" (default targets) -- FAILED.
-Done Building Project "D:\a\avif-format\avif-format\vs\AvifFormat.sln" (Build target(s)) -- FAILED.
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
 
-Build FAILED.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
-"D:\a\avif-format\avif-format\vs\AvifFormat.sln" (Build target) (1) ->
-"D:\a\avif-format\avif-format\vs\AvifFormat.vcxproj" (default target) (2) ->
-(CustomBuild target) -> 
-  D:\a\avif-format\avif-format\src\common\AvifFormatTerminology.h(24): fatal error C1083: Cannot open include file: 'PITerminology.h': No such file or directory [D:\a\avif-format\avif-format\vs\AvifFormat.vcxproj]
-  C:\Program Files\Microsoft Visual Studio\2022\Enterprise\MSBuild\Microsoft\VC\v160\Microsoft.CppCommon.targets(241,5): error MSB8066: Custom build for '..\src\common\AvifFormat.r' exited with code -1. [D:\a\avif-format\avif-format\vs\AvifFormat.vcxproj]
+jobs:
+  build:
+    runs-on: windows-2022
 
-    0 Warning(s)
-    2 Error(s)
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        fetch-depth: 0
+
+    # 1. 借用 Adobe 官方维护的 WebP 插件仓（里面有完整且公开的全套 PS SDK 头文件）
+    - name: Clone Adobe WebP-MUX SDK (Contains full PISDK headers)
+      uses: actions/checkout@v4
+      with:
+        repository: adobe-photoshop/webp-photoshop-plugin
+        path: webp-sdk-source
+        ref: main
+
+    - name: Setup MSBuild
+      uses: microsoft/setup-msbuild@v2
+
+    - name: Restore NuGet Packages
+      run: nuget restore vs/AvifFormat.sln
+
+    # 2. 强制将拉取到的全套官方头文件路径，暴力塞给 MSBuild 的附加包含目录参数
+    # 该仓的头文件完美存放在 webp-sdk-source/pluginsdk/samplecode/common/includes 下
+    - name: Build Solution
+      run: |
+        msbuild vs/AvifFormat.sln /p:Configuration=Release /p:Platform=x64 /t:Build /p:BuildInParallel=true /v:n /p:AdditionalIncludeDirectories="${{ github.workspace }}\webp-sdk-source\pluginsdk\samplecode\common\includes"
+      env:
+        PhotoshopSDKDir: ${{ github.workspace }}\webp-sdk-source\pluginsdk\
+
+    # 3. 收集编译生成的插件产物
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: AvifFormat_x64_Compiled
+        path: |
+          vs/x64/Release/AvifFormat.8bi
+          vs/Release/AvifFormat.8bi
+          vs/x64/Release/Av1Image.8bi
+          vs/Release/Av1Image.8bi
